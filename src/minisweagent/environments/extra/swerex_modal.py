@@ -15,6 +15,8 @@ class SwerexModalEnvironmentConfig:
     """Timeout for executing commands in the container."""
     deployment_extra_kwargs: dict[str, Any] = field(default_factory=dict)
     """Extra kwargs to pass to DockerDeployment."""
+    env: dict[str, str] = field(default_factory=dict)
+    """Environment variables to set in the container."""
 
 
 class SwerexModalEnvironment:
@@ -29,7 +31,12 @@ class SwerexModalEnvironment:
         output = asyncio.run(
             self.deployment.runtime.execute(
                 RexCommand(
-                    command=command, shell=True, check=False, cwd=cwd or self.config.cwd, timeout=self.config.timeout
+                    command=command,
+                    shell=True,
+                    check=False,
+                    cwd=cwd or self.config.cwd,
+                    timeout=self.config.timeout,
+                    env=self.config.env
                 )
             )
         )
