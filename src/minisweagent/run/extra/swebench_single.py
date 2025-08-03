@@ -10,6 +10,8 @@ from datasets import load_dataset
 from minisweagent import global_config_dir
 from minisweagent.agents.interactive import InteractiveAgent
 from minisweagent.config import builtin_config_dir, get_config_path
+from minisweagent.environments.docker import DockerEnvironment
+from minisweagent.environments.extra.swerex_modal import SwerexModalEnvironment
 from minisweagent.models import get_model
 from minisweagent.run.extra.swebench import (
     DATASET_MAPPING,
