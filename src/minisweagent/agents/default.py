@@ -124,6 +124,15 @@ class DefaultAgent:
 
     def has_finished(self, output: dict[str, str]):
         """Raises Submitted exception with final output if the agent has finished its task."""
-        lines = output.get("output", "").lstrip().splitlines()
-        if lines and lines[0].strip() == "MINI_SWE_AGENT_FINAL_OUTPUT":
-            raise Submitted("\n".join(lines[1:]))
+
+        if "MINI_SWE_AGENT_FINAL_OUTPUT" in (text := output.get("output", "")):
+            match = re.search(r"<stdout>(.*?)</stdout>", text, re.DOTALL)
+            if not match:
+                return
+            lines = match.group(1).lstrip().splitlines()
+            if lines and lines[0].strip() == "MINI_SWE_AGENT_FINAL_OUTPUT":
+                raise Submitted("\n".join(lines[1:]))
+
+        # lines = output.get("output", "").lstrip().splitlines()
+        # if lines and lines[0].strip() == "MINI_SWE_AGENT_FINAL_OUTPUT":
+        #     raise Submitted("\n".join(lines[1:]))
