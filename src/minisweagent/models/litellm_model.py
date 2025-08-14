@@ -66,4 +66,6 @@ class LitellmModel:
         GLOBAL_MODEL_STATS.add(cost)
         return {
             "content": response.choices[0].message.content or "",  # type: ignore
+            # "reasoning_content": response.choices[0].message.reasoning_content or ""
+            "reasoning_content": getattr(response.choices[0].message, "reasoning_content", "")
         }

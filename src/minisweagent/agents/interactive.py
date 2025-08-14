@@ -75,6 +75,7 @@ class InteractiveAgent(DefaultAgent):
             return super().query()
 
     def step(self) -> dict:
+        __import__("ipdb").set_trace() 
         # Override the step method to handle user interruption
         try:
             console.print(Rule())

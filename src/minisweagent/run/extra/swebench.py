@@ -20,6 +20,7 @@ from rich.live import Live
 from minisweagent.agents.default import DefaultAgent
 from minisweagent.config import builtin_config_dir, get_config_path
 from minisweagent.environments.docker import DockerEnvironment
+from minisweagent.environments.extra.swerex_modal import SwerexModalEnvironment
 from minisweagent.models import get_model
 from minisweagent.run.extra.utils.batch_progress import RunBatchProgressManager
 from minisweagent.run.utils.save import save_traj
@@ -125,7 +126,7 @@ def process_instance(
     extra_info = None
 
     try:
-        env = DockerEnvironment(**(config.get("environment", {}) | {"image": image_name}))
+        env = SwerexModalEnvironment(**(config.get("environment", {}) | {"image": image_name}))
         agent = ProgressTrackingAgent(
             model,
             env,
