@@ -8,6 +8,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass
 
 from jinja2 import Template
+from rich.console import Console
 
 from minisweagent import Environment, Model
 
@@ -61,6 +62,8 @@ class DefaultAgent:
         self.messages: list[dict] = []
         self.model = model
         self.env = env
+        self.budget_tokens = 131768
+        self.console = Console(width=120)
 
     def render_template(self, template: str, **kwargs) -> str:
         cs = asdict(self.config) | asdict(self.env.config) | asdict(self.model.config) | platform.uname()._asdict()
@@ -85,26 +88,45 @@ class DefaultAgent:
 
     def step(self) -> dict:
         """Query the LM, execute the action, return the observation."""
-        return self.get_observation(self.query())
+        instance_id = getattr(self, "instance_id", "N/A")
+        q = self.query()
+        self.console.log(f"{instance_id=}, step={self.model.n_calls}/{self.config.step_limit}, query={q}")
+        o = self.get_observation(q)
+        return o
 
     def query(self) -> dict:
         """Query the model and return the response."""
         if 0 < self.config.step_limit <= self.model.n_calls or 0 < self.config.cost_limit <= self.model.cost:
             raise LimitsExceeded()
         response = self.model.query(self.messages)
-        self.add_message("assistant", **response)
+        self.add_message(
+            "assistant",
+            f'<think>\n{response["reasoning_content"].strip()}\n</think>' \
+            + response["content"]
+        )
         return response
 
     def get_observation(self, response: dict) -> dict:
         """Execute the action and return the observation."""
         output = self.execute_action(self.parse_action(response))
+
+        remaining_steps = self.config.step_limit - self.model.n_calls
+        output.update({
+            "budget_turns": remaining_steps,
+            "budget_tokens": int(remaining_steps / self.config.step_limit * self.budget_tokens),
+        })
+
         observation = self.render_template(self.config.action_observation_template, output=output)
         self.add_message("user", observation)
         return output
 
     def parse_action(self, response: dict) -> dict:
         """Parse the action from the message. Returns the action."""
-        actions = re.findall(r"```bash\n(.*?)\n```", response["content"], re.DOTALL)
+        actions = re.findall(
+            r"<tool: bash>\n(.*?)\n</tool>",
+            response["content"],
+            re.DOTALL
+        )
         if len(actions) == 1:
             return {"action": actions[0].strip(), **response}
         raise FormatError(self.render_template(self.config.format_error_template, actions=actions))
