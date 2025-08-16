@@ -91,17 +91,19 @@ class DefaultAgent:
         """Query the LM, execute the action, return the observation."""
         instance_id = getattr(self, "instance_id", "N/A")
         q = self.query()
-        self.console.log(f"{instance_id=}, step={self.model.n_calls}/{self.config.step_limit}, query={q}")
         o = self.get_observation(q)
-        self.console.log(f"{instance_id=}, step={self.model.n_calls}/{self.config.step_limit}, observation={o}")
+        self.console.log(
+            f"{instance_id=}, step={self.model.n_calls}/{self.config.step_limit}:\nquery={q}\nobservation={o}",
+            markup=False
+        )
         return o
 
     def query(self) -> dict:
         """Query the model and return the response."""
         if (
-            0 < self.config.step_limit <= self.model.n_calls or 
-            0 < self.config.cost_limit <= self.model.cost or 
-            self.remaining_tokens == 0
+            0 < self.config.step_limit <= self.model.n_calls 
+            or 0 < self.config.cost_limit <= self.model.cost 
+            # or self.remaining_tokens == 0
         ):
             raise LimitsExceeded()
         response = self.model.query(self.messages)
