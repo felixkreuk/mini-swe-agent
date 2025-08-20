@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import shlex
 from dataclasses import dataclass, field
@@ -7,7 +8,13 @@ from typing import Any
 import modal
 from swerex.deployment.modal import ModalDeployment
 from swerex.runtime.abstract import Command as RexCommand
-from tenacity import Retrying, stop_after_attempt, wait_exponential
+from tenacity import Retrying, after_log, before_log, retry, stop_after_attempt, wait_exponential
+
+logging.basicConfig(
+    level=os.environ.get("LOG_LEVEL", logging.INFO),
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -38,11 +45,19 @@ class SwerexModalEnvironment:
             )
             for attempt in Retrying(
                 stop=stop_after_attempt(self.config.deployment_retry),
-                wait=wait_exponential(max=60)
+                wait=wait_exponential(max=60),
+                before=before_log(logger, logging.INFO),
+                after=after_log(logger, logging.INFO),
             ):
                 with attempt:
                     asyncio.run(self.deployment.start())
 
+    @retry(
+        stop=stop_after_attempt(5),
+        wait=wait_exponential(max=60),
+        before=before_log(logger, logging.INFO),
+        after=after_log(logger, logging.INFO),
+    )
     def execute(self, command: str, cwd: str = "") -> dict[str, Any]:
         """Execute a command in the environment and return the raw output."""
         env = self.config.env
@@ -53,7 +68,7 @@ class SwerexModalEnvironment:
 
         command = " ".join(f"{k}={v}" for k,v in env.items()) + " " + command
         command = f"bash -lc {shlex.quote(command)}"
-        print(command)
+        logger.info(command)
 
         output = asyncio.run(
             self.deployment.runtime.execute(
