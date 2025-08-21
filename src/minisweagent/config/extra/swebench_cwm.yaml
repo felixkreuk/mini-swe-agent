@@ -141,7 +141,7 @@ agent:
     <tool: bash>\n(.*?)\n</tool>
   step_limit: 250
   cost_limit: 3.
-  token_limit: 128000
+  token_limit: 131072
   show_budget: true
   reasoning_history: true
   reasoning_open_tag: <think>

@@ -8,13 +8,9 @@ from typing import Any
 import modal
 from swerex.deployment.modal import ModalDeployment
 from swerex.runtime.abstract import Command as RexCommand
-from tenacity import Retrying, after_log, before_log, retry, stop_after_attempt, wait_exponential
+from tenacity import Retrying, before_sleep_log, stop_after_attempt, wait_exponential
 
-logging.basicConfig(
-    level=os.environ.get("LOG_LEVEL", logging.INFO),
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
+from minisweagent.utils.log import logger
 
 
 @dataclass
@@ -30,34 +26,31 @@ class SwerexModalEnvironmentConfig:
     """Environment variables to set in the container."""
     forward_env: dict[str, str] = field(default_factory=dict)
     """Environment variables to set in the container."""
-    deployment_retry: int = 20
-    """Number of times to attempt to start a Modal container"""
+    retry_attempts: int = 20
+    """Number of times to attempt to start an unsafe function"""
+    retry_max_wait: int = 60
+    """Max number of seconds to wait before retries"""
 
 
 class SwerexModalEnvironment:
     def __init__(self, **kwargs):
-        """This class executes bash commands in a Docker container using SWE-ReX for sandboxing."""
+        """This class executes bash commands in a Modal Docker container using SWE-ReX for sandboxing."""
         self.config = SwerexModalEnvironmentConfig(**kwargs)
+        self.retry = Retrying(
+            stop=stop_after_attempt(self.config.retry_attempts),
+            wait=wait_exponential(max=self.config.retry_max_wait),
+            before_sleep=before_sleep_log(logger, logging.INFO),
+            reraise=True,
+        )
         with modal.enable_output():
             self.deployment = ModalDeployment(
                 image=self.config.image,
                 **self.config.deployment_extra_kwargs
             )
-            for attempt in Retrying(
-                stop=stop_after_attempt(self.config.deployment_retry),
-                wait=wait_exponential(max=60),
-                before=before_log(logger, logging.INFO),
-                after=after_log(logger, logging.INFO),
-            ):
+            for attempt in self.retry:
                 with attempt:
                     asyncio.run(self.deployment.start())
 
-    @retry(
-        stop=stop_after_attempt(5),
-        wait=wait_exponential(max=60),
-        before=before_log(logger, logging.INFO),
-        after=after_log(logger, logging.INFO),
-    )
     def execute(self, command: str, cwd: str = "") -> dict[str, Any]:
         """Execute a command in the environment and return the raw output."""
         env = self.config.env
@@ -70,22 +63,27 @@ class SwerexModalEnvironment:
         command = f"bash -lc {shlex.quote(command)}"
         logger.info(command)
 
-        output = asyncio.run(
-            self.deployment.runtime.execute(
-                RexCommand(
-                    command=command,
-                    shell=True,
-                    check=False,
-                    cwd=cwd or self.config.cwd,
-                    timeout=self.config.timeout,
+        for attempt in self.retry:
+            with attempt:
+                output = asyncio.run(
+                    self.deployment.runtime.execute(
+                        RexCommand(
+                            command=command,
+                            shell=True,
+                            check=False,
+                            cwd=cwd or self.config.cwd,
+                            timeout=self.config.timeout,
+                            merge_output_streams=True,
+                        )
+                    )
                 )
-            )
-        )
-        return {
-            # "output": f"<stdout>\n{output.stdout}</stdout>\n<stderr>\n{output.stderr}</stderr>",
-            "output": f"{output.stdout.strip()}{(f'\n\n' + output.stderr) if output.stderr else ''}",
-            "returncode": output.exit_code,
-        }
+                return {
+                    "output": output.stdout,
+                    "returncode": output.exit_code,
+                }
+
+        # unreachable, but we appease the type-checker
+        raise ValueError("Retry loop exited without returning")
 
     def get_template_vars(self) -> dict[str, Any]:
         return asdict(self.config)
