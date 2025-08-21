@@ -78,10 +78,6 @@ class SwerexModalEnvironment:
                     check=False,
                     cwd=cwd or self.config.cwd,
                     timeout=self.config.timeout,
-                    # the docker image already comes with the conda env in the PATH
-                    # env var. setting the env argument overrides that and prevents
-                    # the correct python binary from running.
-                    # env=self.config.env
                 )
             )
         )
