@@ -1,0 +1,172 @@
+agent:
+  system_template: |
+    You are a helpful AI assistant. You always reason before responding, using the following format:
+
+    <think>
+    [your internal reasoning]
+    </think>
+    [your external response]
+
+    # Environment
+
+    You are working in a linux container. The container session is persistent but will restart when encountering errors or after a 120-second session timeout in each turn. You are also constrained by a 131072 total context window limit and a 2400-second overall container lifetime. You can interact with the container through the following tool interface for at most 128 turns. Here are the specifications:
+
+    # Running bash commands:
+    <tool: bash>
+    [command(s)]
+    </tool>
+    Executes bash command(s) [command(s)] in the current session. [command(s)] can be any non-interactive bash command(s), either single or multi-line.
+
+    # Edit files with sed:
+    ## Replace all occurrences
+    <tool: bash>
+    sed -i 's/old_string/new_string/g' filename.py
+    </tool>
+
+    ## Replace only first occurrence
+    <tool: bash>
+    sed -i 's/old_string/new_string/' filename.py
+    </tool>
+
+    ## Replace first occurrence on line 1
+    <tool: bash>
+    sed -i '1s/old_string/new_string/' filename.py
+    </tool>
+
+    ## Replace all occurrences in lines 1-10
+    <tool: bash>
+    sed -i '1,10s/old_string/new_string/g' filename.py
+    </tool>
+
+    ## File creation
+    <tool: bash>
+    cat <<EOF > [path]
+    [content]
+    EOF
+    </tool>
+    Creates a new file at [path] with [content], where [path] must not exist, but its parent directory must exist.
+
+    # submission
+    <tool: bash>
+    echo MINI_SWE_AGENT_FINAL_OUTPUT && git add -A && git diff --cached
+    </tool>
+    Marks the result of `git diff --cached` as your final submission. The meaning and format of this patch depends on the specific user request.
+
+    REQUIREMENTS:
+    * You cannot invoke more than one tool in each step.
+    * You must invoke exactly one tool in each step before any submission call.
+    * After successful submission, provide a final response if the request is resolved, otherwise 
+    continue iterating. You cannot provide a final response before invoking the submission call.
+  instance_template: |
+    Solve the following issue by implementing the necessary code changes and submitting a patch:
+
+    <issue_description>
+    {{task}}
+    </issue_description>
+
+    The result of `git diff --cached` upon submission should be the patch that resolves the issue. This patch should contain the end-to-end code changes. You can refine your patch multiple times as needed to ensure correctness before submission.
+
+    Once you've submitted at least once and are confident in your solution, provide a final response summarizing your work using the following markdown template as a guide. Feel free to adjust the sections as necessary to fit the specific issue and solution:
+
+    ```markdown
+    ## Issue Summary
+
+    Brief description of the issue (bug/feature/enhancement), affected component, and expected outcome.
+
+    ## Investigation and Reproduction
+
+    Steps taken to understand and reproduce the issue: commands executed, test cases run, error messages, debugging approach, and root cause analysis. For features, describe requirement analysis and codebase exploration.
+
+    ## Solution and Code Changes
+
+    High-level approach and rationale for the chosen solution. Specific modifications by file/component, including new functions, classes, or architectural decisions. Explain how changes work together if multiple files are involved.
+
+    ## Testing and Verification
+
+    Description of how you ensure the patch fully resolves the issue, including new tests added (or test changes made) to verify correctness, how you ran existing tests to prevent regressions, and how comprehensive your testing process is (e.g., what edge cases you covered, how you validated correctness across different scenarios).
+    ```
+
+    Your primary objective is to ensure patch correctness above all else - thoroughly explore the codebase, think hard, and leverage significant execution to verify correctness by writing comprehensive tests to validate your solution and running existing tests to prevent regressions. Only submit when you are genuinely confident in your patch's correctness.
+
+    I've uploaded the corresponding code repository at /testbed and installed all the necessary dependencies. Now, the bash session has started, with the current working directory set to the repo root.
+  action_observation_template: |
+    <|start_header_id|>tool: bash<|end_header_id|>
+
+    {% if output.output | length < 10000 -%}
+    <output>
+    {{ output.output }}
+    </output>
+    {%- else -%}
+    <warning>
+    The output of your last command was too long.
+    Please try a different command that produces less output.
+    If you're looking at a file you can try use head, tail or sed to view a smaller number of lines selectively.
+    If you're using grep or find and it produced too much output, you can use a more selective search pattern.
+    If you really need to see something from the full command's output, you can redirect output to a file and then search in that file.
+    </warning>
+    {%- set elided_chars = output.output | length - 10000 -%}
+    <output_head>
+    {{ output.output[:5000] }}
+    </output_head>
+    <elided_chars>
+    {{ elided_chars }} characters elided
+    </elided_chars>
+    <output_tail>
+    {{ output.output[-5000:] }}
+    </output_tail>
+    {%- endif %}
+    {% if budget is not none %}
+    <budget>
+    * Remaining turns: {{budget.remaining_turns}}
+    * Remaining tokens: {{budget.remaining_tokens}}
+    </budget>
+    {% endif %}
+  format_error_template: |
+    1. Please always provide EXACTLY ONE action between <tool: bash> and </tool>, found {{actions|length}} actions.
+    2. Please write your action between <tool: bash> and </tool> as shown in <response_example>.
+
+    <response_example>
+    <think>
+    Here are some thoughts about why you want to perform the action.
+    </think>
+
+    <tool: bash>
+    <action>
+    </tool>
+    </response_example>
+
+    If you have completed your assignment, please consult the first message about how to
+    submit your solution (you will not be able to continue working on this task after that).
+  command_template: |
+    <tool: bash>\n(.*?)\n</tool>
+  step_limit: 250
+  cost_limit: 3.
+  token_limit: 128000
+  show_budget: true
+  reasoning_history: true
+  reasoning_open_tag: <think>
+  reasoning_close_tag: </think>
+
+environment:
+  cwd: "/testbed"
+  timeout: 60
+  deployment_extra_kwargs:
+    startup_timeout: 60
+    deployment_timeout: 3600
+    runtime_timeout: 3600
+  env:
+    PAGER: cat
+    MANPAGER: cat
+    LESS: -R
+    PIP_PROGRESS_BAR: 'off'
+    TQDM_DISABLE: '1'
+  environment_class: swerex_modal
+
+model:
+  litellm_model_registry: "src/minisweagent/config/model_registry.json"
+  model_name: "hosted_vllm/cwm"
+  model_kwargs:
+    api_base: "http://localhost:5678"
+    reasoning: true
+    temperature: 0.6
+    top_p: 0.95

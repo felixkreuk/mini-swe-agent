@@ -6,9 +6,9 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass
 
 from jinja2 import Template
-from rich.console import Console
 
 from minisweagent import Environment, Model
+from minisweagent.utils.log import logger
 
 
 @dataclass
@@ -28,6 +28,12 @@ class AgentConfig:
     action_observation_template: str = "Observation: {{output}}"
     step_limit: int = 0
     cost_limit: float = 3.0
+    token_limit: int | float = float("inf")
+    command_template: str = "```bash\\n(.*?)\\n```"
+    reasoning_history: bool = False
+    reasoning_open_tag: str  = ""
+    reasoning_close_tag: str  = ""
+    show_budget: bool = False
 
 
 class NonTerminatingException(Exception):
@@ -61,9 +67,7 @@ class DefaultAgent:
         self.model = model
         self.env = env
         self.extra_template_vars = {}
-        self.budget_tokens = 131768
-        self.remaining_tokens = self.budget_tokens
-        self.console = Console(width=120)
+        self.remaining_tokens = self.config.token_limit
 
     def render_template(self, template: str, **kwargs) -> str:
         template_vars = asdict(self.config) | self.env.get_template_vars() | self.model.get_template_vars()
@@ -92,9 +96,11 @@ class DefaultAgent:
         instance_id = getattr(self, "instance_id", "N/A")
         q = self.query()
         o = self.get_observation(q)
-        self.console.log(
-            f"{instance_id=}, step={self.model.n_calls}/{self.config.step_limit}:\nquery={q}\nobservation={o}",
-            markup=False
+        logger.debug(
+            f"{instance_id=}, "
+            f"step={self.model.n_calls}/{self.config.step_limit}\n"
+            f"query={q}\n"
+            f"observation={o}\n",
         )
         return o
 
@@ -103,36 +109,50 @@ class DefaultAgent:
         if (
             0 < self.config.step_limit <= self.model.n_calls 
             or 0 < self.config.cost_limit <= self.model.cost 
-            # or self.remaining_tokens == 0
+            or self.remaining_tokens == 0
         ):
             raise LimitsExceeded()
-        response = self.model.query(self.messages)
-        self.add_message(
-            "assistant",
-            f'<think>\n{response["reasoning_content"].strip()}\n</think>' \
-            + response["content"]
-        )
+
+        _messages = [
+            {k: v for k,v in m.items() if k not in ["usage", "reasoning_content"]}
+            for m in self.messages
+        ]
+        response = self.model.query(_messages)
+
+        if self.config.reasoning_history and "reasoning_content" in response:
+            response["content"] = (
+                self.config.reasoning_open_tag + 
+                response["reasoning_content"].strip() + 
+                self.config.reasoning_close_tag + 
+                response.pop("content")
+            )
+
         return response
 
     def get_observation(self, response: dict) -> dict:
         """Execute the action and return the observation."""
         output = self.execute_action(self.parse_action(response))
 
-        remaining_steps = self.config.step_limit - self.model.n_calls
-        self.remaining_tokens = max(0, self.budget_tokens - response["usage"]["total_tokens"])
-        output.update({
-            "budget_turns": remaining_steps,
-            "budget_tokens": self.remaining_tokens,
-        })
+        budget = {"remaining_turns": self.config.step_limit - self.model.n_calls}
+        if (
+            (usage := response.get("usage", None)) and 
+            (total_tokens := usage.get("total_tokens"))
+        ):
+            self.remaining_tokens = max(0, self.config.token_limit - total_tokens)
+            budget["remaining_tokens"] = self.remaining_tokens
 
-        observation = self.render_template(self.config.action_observation_template, output=output)
+        observation = self.render_template(
+            self.config.action_observation_template,
+            output=output,
+            budget=budget if self.config.show_budget else None,
+        )
         self.add_message("user", observation)
         return output
 
     def parse_action(self, response: dict) -> dict:
         """Parse the action from the message. Returns the action."""
         actions = re.findall(
-            r"<tool: bash>\n(.*?)\n</tool>",
+            self.config.command_template.strip(),
             response["content"],
             re.DOTALL
         )

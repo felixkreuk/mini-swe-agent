@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 import shlex
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 import modal
@@ -90,3 +90,6 @@ class SwerexModalEnvironment:
             "output": f"{output.stdout.strip()}{(f'\n\n' + output.stderr) if output.stderr else ''}",
             "returncode": output.exit_code,
         }
+
+    def get_template_vars(self) -> dict[str, Any]:
+        return asdict(self.config)

@@ -65,11 +65,18 @@ class LitellmModel:
         self.n_calls += 1
         self.cost += cost
         GLOBAL_MODEL_STATS.add(cost)
-        return {
-            "usage": response.usage,
+
+        out = {
             "content": response.choices[0].message.content or "",  # type: ignore
-            "reasoning_content": getattr(response.choices[0].message, "reasoning_content", "")
         }
+
+        if usage := getattr(response, "usage", None):
+            out["usage"] = usage
+
+        if reasoning := getattr(response.choices[0].message, "reasoning_content", None):  # type: ignore
+            out["reasoning_content"] = reasoning
+
+        return out
 
     def get_template_vars(self) -> dict[str, Any]:
         return asdict(self.config) | {"n_model_calls": self.n_calls, "model_cost": self.cost}

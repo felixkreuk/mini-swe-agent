@@ -1,4 +1,5 @@
 import logging
+import os
 from pathlib import Path
 
 from rich.logging import RichHandler
@@ -6,7 +7,7 @@ from rich.logging import RichHandler
 
 def _setup_root_logger() -> None:
     logger = logging.getLogger("minisweagent")
-    logger.setLevel(logging.DEBUG)
+    logger.setLevel(os.environ.get("LOG_LEVEL", logging.INFO))
     _handler = RichHandler(
         show_path=False,
         show_time=False,
